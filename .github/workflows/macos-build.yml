@@ -1,0 +1,59 @@
+name: Build macOS DMG
+
+on:
+  workflow_dispatch:    # allows manual run
+  push:
+    branches: [ main ]  # builds on push to main; change if needed
+
+jobs:
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller create-dmg
+
+      - name: Generate icon.icns from icon.ico (optional)
+        if: ${{ exists('icon.ico') && !exists('icon.icns') }}
+        run: |
+          mkdir -p icon.iconset
+          sips -z 128 128 icon.ico --out icon.iconset/icon_128x128.png
+          iconutil -c icns icon.iconset -o icon.icns
+
+      - name: Build macOS .app with PyInstaller
+        run: |
+          pyinstaller --onefile --windowed --clean \
+            --name "Headshot Packager" \
+            --osx-bundle-identifier com.northrop.headshotpackager \
+            $(test -f icon.icns && echo --icon icon.icns) \
+            headshot_packager_gui.py
+
+      - name: Create DMG
+        run: |
+          create-dmg \
+            --volname "Headshot Packager Installer" \
+            $(test -f icon.icns && echo --volicon icon.icns) \
+            --window-pos 200 120 --window-size 600 400 \
+            --icon-size 128 \
+            --icon "Headshot Packager.app" 160 200 \
+            --app-drop-link 440 200 \
+            "Headshot_Packager.dmg" \
+            "dist/Headshot Packager.app"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macOS-build
+          path: |
+            dist/Headshot Packager.app
+            Headshot_Packager.dmg
