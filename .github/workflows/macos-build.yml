@@ -1,9 +1,9 @@
 name: Build macOS DMG
 
 on:
-  workflow_dispatch:    # allows manual run
+  workflow_dispatch:
   push:
-    branches: [ main ]  # builds on push to main; change if needed
+    branches: [ main ]
 
 jobs:
   build-macos:
@@ -13,45 +13,52 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python 3.12
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Install build tooling
+      - name: Install PyInstaller
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller create-dmg
+          pip install pyinstaller
 
-      - name: Convert icon.ico to .icns (if present)
-        run: |
-          if [ -f "icon.ico" ]; then
-            mkdir -p icon.iconset
-            sips -z 128 128 icon.ico --out icon.iconset/icon_128x128.png || true
-            iconutil -c icns icon.iconset -o icon.icns || true
-          else
-            echo "No icon.ico found, skipping icon conversion."
-          fi
-
-      - name: Build macOS .app with PyInstaller
+      - name: Build .app with PyInstaller
         run: |
           pyinstaller --onefile --windowed --clean \
             --name "Headshot Packager" \
             --osx-bundle-identifier com.northrop.headshotpackager \
-            $(test -f icon.icns && echo --icon icon.icns) \
             headshot_packager_gui.py
+          ls -la dist
 
-      - name: Create DMG
+      # Try to make a nice DMG with create-dmg (via Homebrew). If brew/create-dmg
+      # is not available for any reason, fall back to hdiutil.
+      - name: Create DMG (prefer create-dmg, fallback to hdiutil)
         run: |
-          create-dmg \
-            --volname "Headshot Packager Installer" \
-            $(test -f icon.icns && echo --volicon icon.icns) \
-            --window-pos 200 120 --window-size 600 400 \
-            --icon-size 128 \
-            --icon "Headshot Packager.app" 160 200 \
-            --app-drop-link 440 200 \
-            "Headshot_Packager.dmg" \
-            "dist/Headshot Packager.app"
+          set -e
+          BREW_OK=1
+          which brew || BREW_OK=0
+          if [ "$BREW_OK" = "1" ]; then
+            brew install create-dmg || true
+          fi
+
+          if command -v create-dmg >/dev/null 2>&1; then
+            echo "Using create-dmg…"
+            create-dmg \
+              --volname "Headshot Packager Installer" \
+              --window-pos 200 120 --window-size 600 400 \
+              --icon-size 128 \
+              --icon "Headshot Packager.app" 160 200 \
+              --app-drop-link 440 200 \
+              "Headshot_Packager.dmg" \
+              "dist/Headshot Packager.app"
+          else
+            echo "create-dmg not available; using hdiutil fallback…"
+            hdiutil create -volname "Headshot Packager Installer" \
+              -srcfolder "dist/Headshot Packager.app" \
+              -ov -format UDZO Headshot_Packager.dmg
+          fi
+          ls -la
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
